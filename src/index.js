@@ -6,10 +6,10 @@
  *   const versui = create_versui_handler({ resources: { '/index.html': 'blobId...' } })
  *   self.addEventListener('fetch', e => versui.handle(e))
  *
- * With custom caching:
+ * With additional aggregators + caching:
  *   const versui = create_versui_handler({
  *     resources: { '/index.html': 'blobId...' },
- *     aggregators: ['https://...', 'https://...'],
+ *     aggregators: ['https://custom-aggregator.io'],  // Prepended to defaults
  *     cache_name: 'versui-v1',  // Enable caching
  *   })
  */
@@ -25,12 +25,17 @@ const DEFAULT_AGGREGATORS = [
  * Create a Versui fetch handler for your service worker
  * @param {Object} options
  * @param {Object} options.resources - Map of path -> quiltPatchId
- * @param {string[]} [options.aggregators] - Walrus aggregator URLs (with failover)
+ * @param {string[]} [options.aggregators] - Additional aggregator URLs (prepended to defaults for priority)
  * @param {string} [options.cache_name] - Cache name for caching responses (optional)
  * @returns {Object} Handler with handle() and handles() methods
  */
 export function create_versui_handler(options) {
-  const { resources, aggregators = DEFAULT_AGGREGATORS, cache_name = null } = options
+  const { resources, aggregators = [], cache_name = null } = options
+
+  // Merge custom aggregators with defaults (custom first for priority)
+  const final_aggregators = aggregators.length > 0
+    ? [...aggregators, ...DEFAULT_AGGREGATORS]
+    : DEFAULT_AGGREGATORS
 
   /**
    * Check if this request should be handled by Versui
@@ -52,7 +57,7 @@ export function create_versui_handler(options) {
     if (!blob_id) return null
 
     // Try each aggregator until one works
-    for (const aggregator of aggregators) {
+    for (const aggregator of final_aggregators) {
       try {
         const response = await fetch(`${aggregator}/v1/blobs/by-quilt-patch-id/${blob_id}`)
         if (response.ok) {
