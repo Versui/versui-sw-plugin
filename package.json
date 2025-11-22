@@ -8,6 +8,12 @@
     ".": "./src/index.js"
   },
   "files": ["src"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "NODE_NO_WARNINGS=1 node --test test/**/*.test.js"
+  },
   "keywords": ["walrus", "sui", "service-worker", "decentralized", "storage"],
   "author": "Versui Team",
   "license": "Apache-2.0",
