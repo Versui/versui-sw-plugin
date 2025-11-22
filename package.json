@@ -1,20 +1,28 @@
 {
   "name": "@versui/sw-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Service Worker plugin for Versui - fetch assets from Walrus decentralized storage",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "test": "NODE_NO_WARNINGS=1 node --test test/**/*.test.js"
   },
-  "keywords": ["walrus", "sui", "service-worker", "decentralized", "storage"],
+  "keywords": [
+    "walrus",
+    "sui",
+    "service-worker",
+    "decentralized",
+    "storage"
+  ],
   "author": "Versui Team",
   "license": "Apache-2.0",
   "repository": {
