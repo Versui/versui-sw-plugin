@@ -69,6 +69,15 @@ export function create_versui_handler(options = {}) {
   }
 
   /**
+   * Send message to all clients
+   * @param {Object} message
+   */
+  async function notify_clients(message) {
+    const clients = await self.clients.matchAll()
+    clients.forEach(client => client.postMessage(message))
+  }
+
+  /**
    * Fetch a resource from Walrus aggregators with failover
    * @param {string} pathname
    * @returns {Promise<Response>}
@@ -76,6 +85,11 @@ export function create_versui_handler(options = {}) {
   async function fetch_from_walrus(pathname) {
     const blob_id = resources[pathname]
     if (!blob_id) return null
+
+    // Notify loading (only for initial resource, not cached)
+    if (pathname === '/' || pathname === '/index.html') {
+      notify_clients({ type: 'VERSUI_LOADING', message: 'Site is being fetched from <span class="gradient">Walrus</span> and installed in your browser' })
+    }
 
     // Try each aggregator until one works
     for (const aggregator of final_aggregators) {
@@ -96,6 +110,9 @@ export function create_versui_handler(options = {}) {
     // All aggregators failed
     return new Response('Resource unavailable', { status: 404 })
   }
+
+  // Track if site has been installed
+  let site_installed = false
 
   /**
    * Handle a fetch event
@@ -121,6 +138,12 @@ export function create_versui_handler(options = {}) {
         if (cache_name && response && response.ok) {
           const cache = await caches.open(cache_name)
           cache.put(event.request, response.clone())
+
+          // Notify success on first successful cache (site installed)
+          if (!site_installed && (pathname === '/' || pathname === '/index.html')) {
+            site_installed = true
+            notify_clients({ type: 'VERSUI_SUCCESS' })
+          }
         }
 
         return response
