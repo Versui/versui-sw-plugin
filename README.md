@@ -107,4 +107,4 @@ self.addEventListener('fetch', e => versui.handle(e))
 
 ## License
 
-Apache-2.0
+MIT

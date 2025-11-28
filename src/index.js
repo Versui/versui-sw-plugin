@@ -25,8 +25,10 @@
 import { MIME_TYPES } from './mime-types.js'
 
 const DEFAULT_AGGREGATORS = [
-  'https://aggregator.walrus-testnet.walrus.space',
-  'https://aggregator.testnet.blob.store',
+  'https://aggregator.walrus.site',  // mainnet
+  'https://walrus.site',  // mainnet
+  'https://aggregator.walrus-testnet.walrus.space',  // testnet fallback
+  'https://aggregator.testnet.blob.store',  // testnet fallback
 ]
 
 /**
