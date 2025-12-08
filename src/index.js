@@ -1,160 +1,279 @@
 /**
- * @versui/sw-plugin - Service Worker plugin for Walrus decentralized storage
- *
- * Plug-and-play usage (load resources when ready):
- *   import { create_versui_handler } from '@versui/sw-plugin'
- *   const versui = create_versui_handler()
- *   versui.load({ '/index.html': 'blobId...' })
- *   self.addEventListener('fetch', e => versui.handle(e))
- *
- * With options:
- *   const versui = create_versui_handler({
- *     aggregators: ['https://custom-aggregator.io'],  // Prepended to defaults
- *     cache_name: 'versui-v1',  // Enable caching
- *   })
- *   versui.load({ '/index.html': 'blobId...' })
- *
- * Dynamic updates:
- *   self.addEventListener('message', e => {
- *     if (e.data.type === 'UPDATE_VERSUI') {
- *       versui.load(e.data.resources)  // Update resources anytime
- *     }
- *   })
+ * @versui/sw-plugin
+ * Service Worker plugin for fetching assets from Walrus decentralized storage.
  */
 
-import { MIME_TYPES } from './mime-types.js'
+// ============================================================================
+// Constants
+// ============================================================================
 
-const DEFAULT_AGGREGATORS = [
-  'https://aggregator.walrus.site',  // mainnet
-  'https://walrus.site',  // mainnet
-  'https://aggregator.walrus-testnet.walrus.space',  // testnet fallback
-  'https://aggregator.testnet.blob.store',  // testnet fallback
-]
+export const MIME_TYPES = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+  '.txt': 'text/plain',
+  '.xml': 'application/xml',
+}
+
+// ============================================================================
+// Internal Helpers (Pure)
+// ============================================================================
 
 /**
- * Create a Versui fetch handler for your service worker
- * @param {Object} [options={}] - Configuration options
- * @param {Object} [options.resources] - (Optional) Initial resource map (path -> quiltPatchId). Can also use load() method.
- * @param {string[]} [options.aggregators] - Additional aggregator URLs (prepended to defaults for priority)
- * @param {string} [options.cache_name] - Cache name for caching responses (optional)
- * @returns {Object} Handler with load(), handle(), and handles() methods
+ * Normalize path for consistent lookups.
+ * - Strips query strings
+ * - Strips trailing slashes (except root)
+ * - Ensures leading slash
+ * @param {string} url_or_path
+ * @returns {string}
  */
-export function create_versui_handler(options = {}) {
-  const { resources: initial_resources = {}, aggregators = [], cache_name = null } = options
-
-  // Merge custom aggregators with defaults (custom first for priority)
-  const final_aggregators = aggregators.length > 0
-    ? [...aggregators, ...DEFAULT_AGGREGATORS]
-    : DEFAULT_AGGREGATORS
-
-  // Mutable resources - can be updated via load()
-  let resources = { ...initial_resources }
-
-  /**
-   * Load or update resource mappings
-   * @param {Object} new_resources - Map of path -> quiltPatchId
-   * @example
-   *   versui.load({ '/index.html': 'blob123', '/style.css': 'blob456' })
-   */
-  function load(new_resources) {
-    resources = { ...resources, ...new_resources }
+const normalize_path = url_or_path => {
+  // If full URL, extract pathname (URL handles query string automatically)
+  if (url_or_path.startsWith('http')) {
+    const { pathname } = new URL(url_or_path)
+    // Strip trailing slash (except root)
+    if (pathname.length > 1 && pathname.endsWith('/')) {
+      return pathname.slice(0, -1)
+    }
+    return pathname
   }
 
-  /**
-   * Check if this request should be handled by Versui
-   * @param {Request} request
-   * @returns {boolean}
-   */
-  function handles(request) {
-    const pathname = new URL(request.url).pathname
-    return pathname in resources
+  // For non-URL paths, manually strip query string
+  let normalized = url_or_path
+  const query_index = normalized.indexOf('?')
+  if (query_index !== -1) {
+    normalized = normalized.slice(0, query_index)
   }
 
-  /**
-   * Send message to all clients
-   * @param {Object} message
-   */
-  async function notify_clients(message) {
-    const clients = await self.clients.matchAll()
-    clients.forEach(client => client.postMessage(message))
+  // Ensure leading slash
+  if (!normalized.startsWith('/')) {
+    normalized = '/' + normalized
   }
 
-  /**
-   * Fetch a resource from Walrus aggregators with failover
-   * @param {string} pathname
-   * @returns {Promise<Response>}
-   */
-  async function fetch_from_walrus(pathname) {
-    const blob_id = resources[pathname]
-    if (!blob_id) return null
+  // Strip trailing slash (except root)
+  if (normalized.length > 1 && normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1)
+  }
 
-    // Notify loading (only for initial resource, not cached)
-    if (pathname === '/' || pathname === '/index.html') {
-      notify_clients({ type: 'VERSUI_LOADING', message: 'Site is being fetched from <span class="gradient">Walrus</span> and installed in your browser' })
+  return normalized
+}
+
+/**
+ * Get MIME type from file path.
+ * @param {string} path
+ * @returns {string}
+ */
+const get_mime_type = path => {
+  const dot_index = path.lastIndexOf('.')
+  if (dot_index === -1) return 'application/octet-stream'
+
+  const extension = path.slice(dot_index).toLowerCase()
+  return MIME_TYPES[extension] ?? 'application/octet-stream'
+}
+
+/**
+ * Trim trailing slash from URL.
+ * @param {string} url
+ * @returns {string}
+ */
+const trim_trailing_slash = url =>
+  url.endsWith('/') ? url.slice(0, -1) : url
+
+// ============================================================================
+// Internal Helpers (I/O)
+// ============================================================================
+
+/**
+ * Send message to all clients via postMessage.
+ * @param {object} message
+ * @returns {Promise<void>}
+ */
+const notify_clients = async message => {
+  const clients = await self.clients.matchAll()
+  clients.forEach(client => client.postMessage(message))
+}
+
+/**
+ * Try aggregators sequentially with 5s timeout each.
+ * @param {string} quilt_patch_id
+ * @param {string[]} aggregators - URLs with trailing slashes already trimmed
+ * @returns {Promise<Response>}
+ * @throws {Error} - If all aggregators fail
+ */
+const try_aggregators = async (quilt_patch_id, aggregators) => {
+  let last_error
+
+  for (const aggregator of aggregators) {
+    const controller = new AbortController()
+    const timeout_id = setTimeout(() => controller.abort(), 5000)
+
+    try {
+      const url = `${aggregator}/v1/blobs/${quilt_patch_id}`
+      const response = await fetch(url, { signal: controller.signal })
+      clearTimeout(timeout_id)
+
+      if (response.ok) return response
+
+      last_error = new Error(`${aggregator}: ${response.status}`)
+    } catch (error) {
+      clearTimeout(timeout_id)
+      last_error = error
+    }
+  }
+
+  throw last_error
+}
+
+// ============================================================================
+// Factory
+// ============================================================================
+
+/**
+ * Create a Versui handler instance.
+ * @returns {VersuiHandler}
+ */
+export function create_versui_handler() {
+  // Instance state (closure-scoped)
+  let resources = new Map()
+  let aggregators = []
+  let success_notified = false
+
+  /**
+   * Load resources and aggregators from bootstrap message.
+   * @param {object} data
+   * @param {Record<string, string>} data.resources - Map of path to quilt_patch_id
+   * @param {string[]} data.aggregators - Ordered list of aggregator URLs
+   */
+  const load = ({ resources: res, aggregators: agg }) => {
+    // Validate aggregators
+    if (!Array.isArray(agg) || agg.length === 0) {
+      throw new Error('load() requires non-empty aggregators array')
     }
 
-    // Try each aggregator until one works
-    for (const aggregator of final_aggregators) {
+    // Validate resources
+    if (res === null || typeof res !== 'object' || Array.isArray(res)) {
+      throw new Error('load() requires resources object')
+    }
+
+    // Validate each aggregator URL
+    for (const url of agg) {
       try {
-        const response = await fetch(`${aggregator}/v1/blobs/by-quilt-patch-id/${blob_id}`)
-        if (response.ok) {
-          const ext = pathname.match(/\.[^.]+$/)?.[0] || ''
-          const content_type = MIME_TYPES[ext] || 'application/octet-stream'
-          return new Response(await response.blob(), {
-            headers: { 'Content-Type': content_type },
-          })
-        }
-      } catch (e) {
-        // Try next aggregator
+        new URL(url)
+      } catch {
+        throw new Error(`Invalid aggregator URL: ${url}`)
       }
     }
 
-    // All aggregators failed
-    return new Response('Resource unavailable', { status: 404 })
-  }
+    // Clear and store resources with normalized paths
+    resources = new Map()
+    for (const [path, id] of Object.entries(res)) {
+      resources.set(normalize_path(path), id)
+    }
 
-  // Track if site has been installed
-  let site_installed = false
+    // Store aggregators with trailing slashes trimmed
+    aggregators = agg.map(trim_trailing_slash)
+
+    // Reset success notification flag
+    success_notified = false
+  }
 
   /**
-   * Handle a fetch event
-   * @param {FetchEvent} event
+   * Check if handler should process this request.
+   * @param {Request} request
+   * @returns {boolean}
    */
-  function handle(event) {
-    const pathname = new URL(event.request.url).pathname
-    if (!(pathname in resources)) return // Not our resource
-
-    event.respondWith(
-      (async () => {
-        // Check cache first if caching is enabled
-        if (cache_name) {
-          const cache = await caches.open(cache_name)
-          const cached = await cache.match(event.request)
-          if (cached) return cached
-        }
-
-        // Fetch from Walrus
-        const response = await fetch_from_walrus(pathname)
-
-        // Cache the response if caching is enabled
-        if (cache_name && response && response.ok) {
-          const cache = await caches.open(cache_name)
-          cache.put(event.request, response.clone())
-
-          // Notify success on first successful cache (site installed)
-          if (!site_installed && (pathname === '/' || pathname === '/index.html')) {
-            site_installed = true
-            notify_clients({ type: 'VERSUI_SUCCESS' })
-          }
-        }
-
-        return response
-      })()
-    )
+  const handles = request => {
+    const normalized = normalize_path(request.url)
+    return resources.has(normalized)
   }
 
-  return { load, handles, handle, fetch_from_walrus }
-}
+  /**
+   * Handle fetch event, return Response from Walrus.
+   * @param {FetchEvent} event
+   * @returns {Promise<Response>}
+   * @throws {Error} - Synchronously if not initialized
+   */
+  const handle = event => {
+    // Guard: throw sync if not initialized
+    if (aggregators.length === 0) {
+      throw new Error('Handler not initialized - call load() first')
+    }
 
-// Re-export defaults for convenience
-export { DEFAULT_AGGREGATORS, MIME_TYPES }
+    // Return async handling
+    return (async () => {
+      const path = normalize_path(event.request.url)
+      const quilt_patch_id = resources.get(path)
+
+      // Notify loading start
+      await notify_clients({ type: 'VERSUI_LOADING', path })
+
+      try {
+        const response = await try_aggregators(quilt_patch_id, aggregators)
+
+        // Notify first success
+        if (!success_notified) {
+          await notify_clients({ type: 'VERSUI_SUCCESS' })
+          success_notified = true
+        }
+
+        // Return response with correct MIME type
+        return new Response(response.body, {
+          status: 200,
+          headers: { 'Content-Type': get_mime_type(path) }
+        })
+      } catch (error) {
+        // Notify error
+        await notify_clients({ type: 'VERSUI_ERROR', error: error.message })
+
+        // Return 502
+        return new Response('Walrus fetch failed', {
+          status: 502,
+          statusText: 'Bad Gateway',
+          headers: { 'Content-Type': 'text/plain' }
+        })
+      }
+    })()
+  }
+
+  /**
+   * Direct fetch helper (no notifications).
+   * @param {string} path
+   * @returns {Promise<Response>}
+   * @throws {Error} - If not initialized or path not found
+   */
+  const fetch_from_walrus = async path => {
+    // Guard: throw if not initialized
+    if (aggregators.length === 0) {
+      throw new Error('Handler not initialized - call load() first')
+    }
+
+    const normalized = normalize_path(path)
+    const quilt_patch_id = resources.get(normalized)
+
+    if (!quilt_patch_id) {
+      throw new Error(`Resource not found: ${normalized}`)
+    }
+
+    return try_aggregators(quilt_patch_id, aggregators)
+  }
+
+  return {
+    load,
+    handles,
+    handle,
+    fetch_from_walrus
+  }
+}

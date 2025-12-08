@@ -1,108 +1,75 @@
 # @versui/sw-plugin
 
+Service Worker plugin for fetching assets from Walrus decentralized storage.
+
+## Overview
+
+Required integration for sites deployed to Versui that have their own Service Worker. Handles Walrus asset fetching with multi-aggregator failover.
+
+Sites without a custom SW do not need this - the Versui Worker generates one automatically.
+
+## Installation
+
 ```bash
 npm install @versui/sw-plugin
 ```
 
-```js
-// sw.js
-import { create_versui_handler } from '@versui/sw-plugin'
-
-const versui = create_versui_handler()
-versui.load({ '/index.html': 'your-quilt-patch-id' })
-
-self.addEventListener('fetch', e => versui.handle(e))
-```
-
-*Service Worker plugin for fetching assets from Walrus decentralized storage*
-
-## Usage Patterns
-
-### Auto-generated SW (via `versui deploy`)
-
-Service worker already generated. No plugin integration needed.
-
-### Custom Service Worker
+## Usage
 
 ```js
-// sw.js
 import { create_versui_handler } from '@versui/sw-plugin'
 
 const versui = create_versui_handler()
 
-versui.load({
-  '/index.html': 'your-quilt-patch-id',
-  '/assets/main.js': 'another-patch-id',
-})
-
-self.addEventListener('install', () => self.skipWaiting())
-self.addEventListener('activate', e => e.waitUntil(clients.claim()))
-self.addEventListener('fetch', e => versui.handle(e))
-```
-
-### Caching + Custom Aggregators
-
-```js
-const versui = create_versui_handler({
-  cache_name: 'my-app-v1',
-  aggregators: ['https://my-custom-aggregator.com'],
-})
-
-versui.load({ '/index.html': 'blob123' })
-```
-
-### Dynamic Updates
-
-```js
 self.addEventListener('message', e => {
-  if (e.data.type === 'UPDATE_VERSUI') {
-    versui.load(e.data.resources)
+  if (e.data.type === 'VERSUI_RESOURCES') {
+    versui.load(e.data)  // { resources, aggregators }
   }
 })
-```
 
-From your app:
-```js
-navigator.serviceWorker.controller.postMessage({
-  type: 'UPDATE_VERSUI',
-  resources: { '/index.html': 'new-blob-id' }
-})
-```
-
-### Combining with Other Logic
-
-```js
 self.addEventListener('fetch', e => {
   if (versui.handles(e.request)) {
-    versui.handle(e)
+    e.respondWith(versui.handle(e))
     return
   }
-
-  e.respondWith(fetch(e.request))
+  // Your existing fetch logic...
 })
 ```
 
 ## API
 
-### `create_versui_handler(options)`
+### `create_versui_handler()`
 
-**Options (all optional):**
-- `resources`: Initial resource map (can also use `.load()` method)
-- `aggregators`: Additional aggregators (prepended to defaults for priority)
-- `cache_name`: Enable response caching (default: null)
+Factory function returning a handler object.
 
-**Returns object with methods:**
-- `load(resources)`: Load/update resource mappings (path -> quiltPatchId)
-- `handle(event)`: Handle fetch events for Versui resources
-- `handles(request)`: Check if request should be handled
-- `fetch_from_walrus(pathname)`: Manually fetch a resource
+### `handler.load({ resources, aggregators })`
 
-**Example:**
-```js
-const versui = create_versui_handler({ cache_name: 'v1' })
-versui.load({ '/index.html': 'blob123' })
-self.addEventListener('fetch', e => versui.handle(e))
-```
+Load resources and aggregators from Versui bootstrap message.
+
+- `resources`: Map of path to quilt_patch_id
+- `aggregators`: Ordered list of aggregator URLs to try
+
+### `handler.handles(request)`
+
+Check if this handler should process the request.
+
+### `handler.handle(event)`
+
+Handle fetch event, return Response from Walrus.
+
+### `handler.fetch_from_walrus(path)`
+
+Direct fetch helper for advanced use cases (no client notifications).
+
+## Client Messages
+
+The handler sends these messages to clients via postMessage:
+
+| Message | Fields | When |
+|---------|--------|------|
+| `VERSUI_LOADING` | `{ type, path }` | Starting fetch for asset |
+| `VERSUI_SUCCESS` | `{ type }` | First successful Walrus fetch per handler instance |
+| `VERSUI_ERROR` | `{ type, error }` | All aggregators failed for a request |
 
 ## License
 
