@@ -1,7 +1,7 @@
 {
   "name": "@versui/sw-plugin",
-  "version": "0.1.3",
-  "description": "Service Worker plugin for Versui - fetch assets from Walrus decentralized storage",
+  "version": "1.0.0",
+  "description": "Service Worker plugin for fetching assets from Walrus decentralized storage",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -21,7 +21,8 @@
     "sui",
     "service-worker",
     "decentralized",
-    "storage"
+    "storage",
+    "versui"
   ],
   "author": "Versui Team",
   "license": "MIT",
