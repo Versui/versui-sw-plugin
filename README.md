@@ -1,20 +1,19 @@
-# @versui/sw-plugin
+<p align="center">
+  <img src="assets/banner.jpg" alt="@versui/sw-plugin banner" width="100%">
+</p>
+<h1 align="center">@versui/sw-plugin</h1>
+<p align="center">
+  <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" />
+  <img src="https://img.shields.io/badge/Service_Worker-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" />
+  <img src="https://img.shields.io/badge/Walrus-0F1419?style=for-the-badge&logo=sui&logoColor=white" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
+</p>
 
-Service Worker plugin for fetching assets from Walrus decentralized storage.
-
-## Overview
-
-Required integration for sites deployed to Versui that have their own Service Worker. Handles Walrus asset fetching with multi-aggregator failover.
-
-Sites without a custom SW do not need this - the Versui Worker generates one automatically.
-
-## Installation
+---
 
 ```bash
 npm install @versui/sw-plugin
 ```
-
-## Usage
 
 ```js
 import { create_versui_handler } from '@versui/sw-plugin'
@@ -23,7 +22,7 @@ const versui = create_versui_handler()
 
 self.addEventListener('message', e => {
   if (e.data.type === 'VERSUI_RESOURCES') {
-    versui.load(e.data)  // { resources, aggregators }
+    versui.load(e.data)
   }
 })
 
@@ -32,45 +31,52 @@ self.addEventListener('fetch', e => {
     e.respondWith(versui.handle(e))
     return
   }
-  // Your existing fetch logic...
 })
 ```
+
+*Service Worker plugin for fetching assets from Walrus decentralized storage*
+
+## Features
+
+- Multi-aggregator failover with 5s timeout per aggregator
+- Automatic MIME type detection
+- Path normalization (query strings, trailing slashes)
+- Client notifications for loading/success/error states
+
+## When You Need This
+
+> [!NOTE]
+> Sites without a custom Service Worker do **not** need this package - Versui Worker generates one automatically.
+
+Required when your site has its own `sw.js` and deploys to Versui.
 
 ## API
 
 ### `create_versui_handler()`
 
-Factory function returning a handler object.
+Returns handler with:
 
-### `handler.load({ resources, aggregators })`
+| Method | Description |
+|--------|-------------|
+| `load({ resources, aggregators })` | Initialize with resource map and aggregator URLs |
+| `handles(request)` | Check if request should be handled |
+| `handle(event)` | Handle fetch event, return Response from Walrus |
+| `fetch_from_walrus(path)` | Direct fetch (no notifications) |
 
-Load resources and aggregators from Versui bootstrap message.
-
-- `resources`: Map of path to quilt_patch_id
-- `aggregators`: Ordered list of aggregator URLs to try
-
-### `handler.handles(request)`
-
-Check if this handler should process the request.
-
-### `handler.handle(event)`
-
-Handle fetch event, return Response from Walrus.
-
-### `handler.fetch_from_walrus(path)`
-
-Direct fetch helper for advanced use cases (no client notifications).
-
-## Client Messages
-
-The handler sends these messages to clients via postMessage:
+### Client Messages
 
 | Message | Fields | When |
 |---------|--------|------|
-| `VERSUI_LOADING` | `{ type, path }` | Starting fetch for asset |
-| `VERSUI_SUCCESS` | `{ type }` | First successful Walrus fetch per handler instance |
-| `VERSUI_ERROR` | `{ type, error }` | All aggregators failed for a request |
+| `VERSUI_LOADING` | `{ type, path }` | Starting fetch |
+| `VERSUI_SUCCESS` | `{ type }` | First successful fetch after `load()` |
+| `VERSUI_ERROR` | `{ type, error }` | All aggregators failed |
+
+## Exports
+
+```js
+import { create_versui_handler, MIME_TYPES } from '@versui/sw-plugin'
+```
 
 ## License
 
-MIT
+[MIT](LICENSE)
